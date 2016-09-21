@@ -1,0 +1,5 @@
+﻿Task .. 
+Lamp apache on centos 
+Lamp with ngnix centos 
+Jenkins .. Also 
+..,......read usr mgmt . .. Revise networking.. 
