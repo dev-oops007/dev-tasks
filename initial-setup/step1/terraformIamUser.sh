@@ -22,21 +22,28 @@ cat > s3-policy.json << EOF
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": "s3:ListBucket",
-      "Resource": "arn:aws:s3:::$BUCKET_NAME",
-      "Condition": {
-        "StringLike": {
-          "s3:prefix": ["$OBJECT_KEY_PATH/*"]
-        }
-      }
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::dev-test-tf-state",
+        "arn:aws:s3:::dev-test-tf-state/terraform/*"
+      ]
     },
     {
       "Effect": "Allow",
       "Action": [
-        "s3:GetObject",
-        "s3:PutObject"
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Scan",
+        "dynamodb:Query",
+        "dynamodb:UpdateItem"
       ],
-      "Resource": "arn:aws:s3:::$BUCKET_NAME/$OBJECT_KEY_PATH/*"
+      "Resource": "arn:aws:dynamodb:us-east-1:038462762244:table/terraform-lock-table"
+      
     }
   ]
 }
@@ -56,5 +63,5 @@ echo "policy attached"
 echo "Verify the user and policy attachment"
 aws iam get-user --user-name $USER_NAME
 
-echo "list attached policies on role"
+#echo "list attached policies on role"
 aws iam list-attached-user-policies --user-name $USER_NAME

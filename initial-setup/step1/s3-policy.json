@@ -3,21 +3,28 @@
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": "s3:ListBucket",
-      "Resource": "arn:aws:s3:::dev-test-tf-state",
-      "Condition": {
-        "StringLike": {
-          "s3:prefix": ["terraform/*"]
-        }
-      }
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::dev-test-tf-state",
+        "arn:aws:s3:::dev-test-tf-state/terraform/*"
+      ]
     },
     {
       "Effect": "Allow",
       "Action": [
-        "s3:GetObject",
-        "s3:PutObject"
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Scan",
+        "dynamodb:Query",
+        "dynamodb:UpdateItem"
       ],
-      "Resource": "arn:aws:s3:::dev-test-tf-state/terraform/*"
+      "Resource": "arn:aws:dynamodb:us-east-1:038462762244:table/terraform-lock-table"
+      
     }
   ]
 }
