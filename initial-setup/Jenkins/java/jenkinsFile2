@@ -1,0 +1,114 @@
+pipeline {
+    agent any
+    parameters {
+        string(name: 'ENV', defaultValue: 'dev', description: 'Target Environment (dev, test, stage, prod)')
+    }
+    environment {
+        DOCKER_IMAGE = "my-docker-registry/myapp"
+        IMAGE_TAG = "${DOCKER_IMAGE}:${params.ENV}-${env.BUILD_NUMBER}" // Defined once and reused
+        EKS_NAMESPACE = "${params.ENV}" // Environment-specific namespace
+        HELM_CHART_PATH = "./helm-chart"
+    }
+    stages {
+        stage('Checkout SCM') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Maven Build and Sonar Analysis') {
+            steps {
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        sh "mvn clean package sonar:sonar"
+                    }
+                }
+            }
+        }
+        stage('Static Code Analysis (SCA)') {
+            steps {
+                echo "Running SAST and DAST scans..."
+                withCredentials([string(credentialsId: 'sast-token', variable: 'SAST_TOKEN')]) {
+                    sh "run-sast-tool.sh --token $SAST_TOKEN"
+                }
+                withCredentials([string(credentialsId: 'dast-token', variable: 'DAST_TOKEN')]) {
+                    sh "run-dast-tool.sh --token $DAST_TOKEN"
+                }
+            }
+        }
+        stage('Upload to JFrog') {
+            when {
+                expression { currentBuild.result == null } // Only if previous stages passed
+            }
+            steps {
+                script {
+                    rtServer(
+                        id: 'Artifactory',
+                        credentialsId: 'jfrog-credentials'
+                    )
+                    rtUpload(
+                        serverId: 'Artifactory',
+                        spec: '''{
+                            "files": [{
+                                "pattern": "target/*.jar",
+                                "target": "my-repo-local/myapp/${params.ENV}/"
+                            }]
+                        }'''
+                    )
+                    rtPublishBuildInfo serverId: 'Artifactory'
+                }
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh "docker build -t ${IMAGE_TAG} ."
+                }
+            }
+        }
+        stage('Scan Docker Image') {
+            steps {
+                script {
+                    sh "trivy image --exit-code 1 --severity HIGH ${IMAGE_TAG}"
+                }
+            }
+        }
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'docker-registry-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh """
+                            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                            docker push ${IMAGE_TAG}
+                        """
+                    }
+                }
+            }
+        }
+        stage('Deploy to EKS') {
+            steps {
+                echo "Deploying to ${params.ENV} environment..."
+                script {
+                    withCredentials([string(credentialsId: 'aws-eks-kubeconfig', variable: 'KUBECONFIG_CONTENT')]) {
+                        writeFile file: '/tmp/kubeconfig', text: KUBECONFIG_CONTENT
+                        sh """
+                            export KUBECONFIG=/tmp/kubeconfig
+                            helm upgrade --install myapp ${HELM_CHART_PATH} \
+                                -f ${HELM_CHART_PATH}/values-${params.ENV}.yaml \
+                                --set image.repository=${DOCKER_IMAGE} \
+                                --set image.tag=${params.ENV}-${env.BUILD_NUMBER} \
+                                --namespace ${EKS_NAMESPACE}
+                        """
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo "Pipeline completed successfully for ${params.ENV} environment!"
+        }
+        failure {
+            echo "Pipeline failed for ${params.ENV} environment!"
+        }
+    }
+}

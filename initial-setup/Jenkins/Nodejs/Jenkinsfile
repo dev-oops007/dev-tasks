@@ -1,0 +1,101 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = 'quick-example-app' // Replace with your Docker image name
+        DOCKER_REGISTRY = 'your-docker-registry-url' // Replace with your Docker Registry URL
+    }
+
+    parameters {
+        string(name: 'DOCKER_TAG', defaultValue: 'latest', description: 'Docker tag version')
+    }
+
+    stages {
+        
+        
+        //stage('Checkout SCM') {
+          //  steps {
+                // Clone the repository
+            //    checkout scm
+            //}
+        //}
+        stage('Checkout SCM') {
+    steps {
+        // Replace the repository URL and branch as needed
+        git branch: 'main', 
+            url: 'https://github.com/Lissy93/quick-example-of-testing-in-nodejs.git', 
+            credentialsId: 'your-credentials-id'
+    }
+}
+
+        stage('Install Dependencies') {
+            steps {
+                // Install Node.js dependencies
+                sh 'npm install'
+            }
+        }
+
+        stage('Run Unit Tests') {
+            steps {
+                // Run Mocha tests and generate coverage
+                sh 'npm test'
+                sh 'npm run cover'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                // Use SonarQube from global tool configuration
+                withSonarQubeEnv('sonar') { // 'sonar' is the SonarQube instance name configured in Jenkins
+                    sh """
+                    sonar-scanner \
+                        -Dsonar.projectKey=quick-example-app \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=$SONAR_HOST_URL \
+                        -Dsonar.login=$SONAR_AUTH_TOKEN
+                    """
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                // Build Docker image
+                sh """
+                docker build -t ${DOCKER_IMAGE}:${params.DOCKER_TAG} .
+                """
+            }
+        }
+
+        stage('Scan Docker Image with Trivy') {
+            steps {
+                // Scan the Docker image for vulnerabilities
+                sh """
+                trivy image ${DOCKER_IMAGE}:${params.DOCKER_TAG}
+                """
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                // Push Docker image to the registry
+                withDockerRegistry([credentialsId: 'docker-registry-creds', url: "https://${DOCKER_REGISTRY}"]) {
+                    sh """
+                    docker tag ${DOCKER_IMAGE}:${params.DOCKER_TAG} ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${params.DOCKER_TAG}
+                    docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${params.DOCKER_TAG}
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Archive test results
+            junit 'coverage/*.xml' // Update the path as necessary
+            // Clean workspace after build
+            cleanWs()
+        }
+        success {
+            // Notify success
+            echo 'Pipeline executed successfully

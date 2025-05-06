@@ -1,0 +1,106 @@
+#Revised Jenkinsfile incorporating security practices to manage sensitive data securely. 
+#The Jenkinsfile uses Jenkins Credentials Store and secure integrations, 
+#ensuring no sensitive data (e.g., tokens, passwords, or keys) is hardcoded.
+
+pipeline {
+    # agent any
+    agent {
+        node {
+            label 'node-label' // Replace with your desired node label
+        }
+    }
+    parameters {
+        string(name: 'ENV', defaultValue: 'dev', description: 'Target Environment (dev, test, stage, prod)')
+    }
+    environment {
+        DOCKER_IMAGE = "my-docker-registry/myapp"
+        EKS_NAMESPACE = "${params.ENV}" // Environment-specific namespace
+        HELM_CHART_PATH = "./helm-chart"
+    }
+    stages {
+        stage('Checkout SCM') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Maven Build and Sonar Analysis') {
+            steps {
+                script {
+                    withSonarQubeEnv('SonarQube') { // Use Jenkins-configured SonarQube server
+                        sh 'mvn clean package sonar:sonar'
+                    }
+                }
+            }
+        }
+        stage('Static Code Analysis (SCA)') {
+            steps {
+                echo "Running SAST and DAST scans..."
+                sh 'run-sast-tool.sh'
+                sh 'run-dast-tool.sh'
+            }
+        }
+        stage('Upload to JFrog') {
+            steps {
+                script {
+                    rtUpload(
+                        serverId: 'Artifactory', // Jenkins Artifactory server ID
+                        spec: '''{
+                            "files": [{
+                                "pattern": "target/*.jar",
+                                "target": "my-repo-local/myapp/${params.ENV}/"
+                            }]
+                        }'''
+                    )
+                    rtPublishBuildInfo serverId: 'Artifactory'
+                }
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    def imageTag = "${DOCKER_IMAGE}:${params.ENV}-${env.BUILD_NUMBER}"
+                    sh "docker build -t ${imageTag} ."
+                }
+            }
+        }
+        stage('Scan Docker Image') {
+            steps {
+                script {
+                    def imageTag = "${DOCKER_IMAGE}:${params.ENV}-${env.BUILD_NUMBER}"
+                    sh "trivy image ${imageTag}"
+                }
+            }
+        }
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    def imageTag = "${DOCKER_IMAGE}:${params.ENV}-${env.BUILD_NUMBER}"
+                    sh "docker push ${imageTag}"
+                }
+            }
+        }
+        stage('Deploy to EKS') {
+            steps {
+                echo "Deploying to ${params.ENV} environment..."
+                script {
+                    def imageTag = "${DOCKER_IMAGE}:${params.ENV}-${env.BUILD_NUMBER}"
+                    sh """
+                        helm upgrade --install myapp ${HELM_CHART_PATH} \
+                            -f ${HELM_CHART_PATH}/values-${params.ENV}.yaml \
+                            --set image.repository=${DOCKER_IMAGE} \
+                            --set image.tag=${params.ENV}-${env.BUILD_NUMBER} \
+                            --namespace ${EKS_NAMESPACE}
+                    """
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo "Pipeline completed successfully for ${params.ENV} environment!"
+        }
+        failure {
+            echo "Pipeline failed for ${params.ENV} environment!"
+        }
+    }
+}

@@ -11,5 +11,6 @@ terraform {
 # export AWS_SHARED_CREDENTIALS_FILE=~/.aws/credentials
 provider "aws" {
     region = "us-east-1"
+    profile = "terraform-bot"
     #shared_credentials_files = "~/vagrant_data/.aws/credentials"
 }

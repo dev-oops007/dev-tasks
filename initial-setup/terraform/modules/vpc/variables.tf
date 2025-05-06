@@ -1,0 +1,7 @@
+variable "vpc_cidr" {}
+variable "public_subnets" { type = list(string) }
+variable "private_subnets" { type = list(string) }
+variable "azs" { type = list(string) }
+variable "name" {}
+variable "nat_ami" {}
+variable "admin_ip" {}
